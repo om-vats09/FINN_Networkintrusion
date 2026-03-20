@@ -1,0 +1,6 @@
+flask
+torch
+brevitas
+numpy
+scikit-learn
+onnxruntime

@@ -1,0 +1,284 @@
+from flask import Flask, jsonify, render_template_string
+import torch
+import numpy as np
+import threading
+import time
+import random
+from collections import deque
+import os
+
+app = Flask(__name__)
+
+# ── Lightweight model (no file loading needed) ────────────────────
+import torch.nn as nn
+import brevitas.nn as qnn
+
+def build_model():
+    return nn.Sequential(
+        qnn.QuantLinear(41, 64,  bias=True, weight_bit_width=8),
+        qnn.QuantReLU(bit_width=8),
+        qnn.QuantLinear(64, 128, bias=True, weight_bit_width=8),
+        qnn.QuantReLU(bit_width=8),
+        qnn.QuantLinear(128, 64, bias=True, weight_bit_width=8),
+        qnn.QuantReLU(bit_width=8),
+        qnn.QuantLinear(64, 2,   bias=True, weight_bit_width=8),
+    )
+
+MODEL_PATH = os.environ.get('MODEL_PATH', 'models/model_8bit.pt')
+model      = None
+
+def load_model():
+    global model
+    try:
+        m = build_model()
+        m.load_state_dict(torch.load(MODEL_PATH, map_location='cpu'))
+        m.eval()
+        model = m
+        print("Model loaded from file")
+    except Exception as e:
+        print(f"Model file not found ({e}) — using random weights for demo")
+        model = build_model()
+        model.eval()
+
+load_model()
+
+# ── Traffic simulation ────────────────────────────────────────────
+ATTACK_NAMES = [
+    ('SYN Flood',       'DoS',   [0]*9 + [511,511,1.0,1.0,0,0,1.0,0,0,255,255,1.0,0,1.0,0,1.0,1.0,0,0] + [0]*13),
+    ('UDP Flood',       'DoS',   [0]*9 + [511,511,0,0,0,0,1.0,0,0,255,255,1.0,0,1.0,0,0,0,0,0] + [0]*13),
+    ('Port Scan',       'Probe', [0]*9 + [1,1,0,0,1.0,1.0,0,1.0,0,30,10,0.03,0.97,0,0,0,0,1.0,1.0] + [0]*13),
+    ('Normal HTTP',     'Normal',[0,2,20,10,215,45076] + [0]*7 + [1,0,1,1,1,0,0,0,0,1.0,0,0,255,255,1.0,0,0,0,0,0,0,0]),
+    ('Normal FTP',      'Normal',[0,2,10,10,2360,4580] + [0]*7 + [1,0,2,2,1.0,0,0,0,0,10,10,1.0,0,0,0,0,0,0,0]),
+    ('ICMP Flood',      'DoS',   [0,0,49,10] + [0]*6 + [511,511,0,0,1.0,0,0,0,255,255,1.0,0,1.0,0,0,0,0,0] + [0]*13),
+    ('FTP Brute Force', 'R2L',   [2,2,10,10,105,146,0,0,0,0,5,0] + [0]*8 + [1,1] + [0]*19),
+    ('Normal SSH',      'Normal',[45,2,55,10,3428,14728] + [0]*7 + [1,0,1,1,1.0,0,0,0,0,5,5,1.0,0,0,0,0,0,0,0]),
+]
+
+def make_features(template):
+    f = np.array(template[:41], dtype=np.float32)
+    f += np.random.normal(0, 0.01, 41).astype(np.float32)
+    f = np.clip(f, 0, None)
+    return f
+
+def predict(features):
+    t = torch.tensor(features.reshape(1, -1), dtype=torch.float32)
+    with torch.no_grad():
+        out   = model(t)
+        pred  = out.argmax(dim=1).item()
+        probs = torch.softmax(out, dim=1).numpy()[0]
+    return pred, float(probs[pred]) * 100
+
+# ── Shared state ──────────────────────────────────────────────────
+state = {
+    'total'       : 0,
+    'attacks'     : 0,
+    'normal'      : 0,
+    'recent'      : deque(maxlen=15),
+    'pps'         : 0,
+    'attack_types': {'DoS': 0, 'Probe': 0, 'R2L': 0, 'U2R': 0},
+    'running'     : True
+}
+
+def feed_loop():
+    count      = 0
+    start_time = time.time()
+    while state['running']:
+        name, atype, template = random.choice(ATTACK_NAMES)
+        features              = make_features(template)
+        pred, conf            = predict(features)
+
+        state['total'] += 1
+        count          += 1
+
+        elapsed = time.time() - start_time
+        if elapsed >= 1.0:
+            state['pps'] = round(count / elapsed)
+            count        = 0
+            start_time   = time.time()
+
+        if pred == 1:
+            state['attacks'] += 1
+            if atype in state['attack_types']:
+                state['attack_types'][atype] += 1
+        else:
+            state['normal'] += 1
+
+        state['recent'].appendleft({
+            'id'   : state['total'],
+            'label': 'ATTACK' if pred == 1 else 'NORMAL',
+            'type' : name,
+            'atype': atype,
+            'conf' : round(conf, 1),
+            'src'  : f"192.168.{random.randint(1,254)}.{random.randint(1,254)}",
+            'dst'  : f"10.0.{random.randint(0,10)}.{random.randint(1,50)}",
+        })
+        time.sleep(0.4)
+
+thread = threading.Thread(target=feed_loop, daemon=True)
+thread.start()
+
+# ── HTML ──────────────────────────────────────────────────────────
+HTML = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>IDS Live Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#e6edf3;font-family:'Segoe UI',Arial,sans-serif}
+.header{background:#161b22;border-bottom:1px solid #30363d;
+        padding:14px 24px;display:flex;align-items:center;gap:16px}
+.header h1{font-size:18px;font-weight:500;color:#58a6ff}
+.dot{width:10px;height:10px;border-radius:50%;background:#3fb950;
+     animation:pulse 1.5s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:16px 24px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:16px}
+.card h3{font-size:11px;color:#8b949e;text-transform:uppercase;
+         letter-spacing:1px;margin-bottom:8px}
+.val{font-size:28px;font-weight:600}
+.val.green{color:#3fb950}.val.red{color:#f85149}
+.val.blue{color:#58a6ff}.val.amber{color:#d29922}
+.body{display:grid;grid-template-columns:1fr 340px;gap:12px;padding:0 24px 24px}
+.feed{background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden}
+.feed-header{padding:12px 16px;border-bottom:1px solid #30363d;
+             font-size:13px;color:#8b949e}
+.feed-labels{display:grid;
+             grid-template-columns:55px 90px 160px 130px 130px 75px;
+             padding:8px 16px;border-bottom:1px solid #30363d;
+             font-size:11px;color:#8b949e;text-transform:uppercase}
+.feed-row{display:grid;
+          grid-template-columns:55px 90px 160px 130px 130px 75px;
+          padding:9px 16px;border-bottom:1px solid #21262d;
+          font-size:12px;align-items:center;transition:background .2s}
+.feed-row:hover{background:#1c2128}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;
+       font-size:11px;font-weight:500}
+.badge.attack{background:rgba(248,81,73,.15);color:#f85149}
+.badge.normal{background:rgba(63,185,80,.15);color:#3fb950}
+.right-col{display:flex;flex-direction:column;gap:12px}
+.chart-card{background:#161b22;border:1px solid #30363d;
+            border-radius:10px;padding:16px}
+.chart-card h3{font-size:11px;color:#8b949e;text-transform:uppercase;
+               letter-spacing:1px;margin-bottom:12px}
+.rate-bar{height:8px;background:#21262d;border-radius:4px;
+          margin-top:8px;overflow:hidden}
+.rate-fill{height:100%;border-radius:4px;background:#f85149;transition:width .5s}
+.rate-label{font-size:12px;color:#8b949e;margin-top:6px}
+@media(max-width:900px){
+  .body{grid-template-columns:1fr}
+  .grid{grid-template-columns:repeat(2,1fr)}
+  .feed-labels,.feed-row{grid-template-columns:50px 80px 1fr 70px}
+  .feed-labels span:nth-child(4),
+  .feed-labels span:nth-child(5),
+  .feed-row span:nth-child(4),
+  .feed-row span:nth-child(5){display:none}
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="dot"></div>
+  <h1>FPGA-NIDS Live Dashboard</h1>
+  <span style="font-size:12px;color:#8b949e;margin-left:auto">
+    NSL-KDD · 8-bit Quantized MLP · Brevitas
+  </span>
+</div>
+<div class="grid">
+  <div class="card"><h3>Total packets</h3>
+    <div class="val blue" id="total">0</div></div>
+  <div class="card"><h3>Attacks detected</h3>
+    <div class="val red" id="attacks">0</div></div>
+  <div class="card"><h3>Normal traffic</h3>
+    <div class="val green" id="normal">0</div></div>
+  <div class="card"><h3>Predictions / sec</h3>
+    <div class="val amber" id="pps">0</div></div>
+</div>
+<div class="body">
+  <div class="feed">
+    <div class="feed-header">Live traffic feed</div>
+    <div class="feed-labels">
+      <span>#</span><span>Result</span><span>Type</span>
+      <span>Source IP</span><span>Dest IP</span><span>Conf</span>
+    </div>
+    <div id="feed-body"></div>
+  </div>
+  <div class="right-col">
+    <div class="chart-card">
+      <h3>Attack type breakdown</h3>
+      <canvas id="pie" height="200"></canvas>
+    </div>
+    <div class="chart-card">
+      <h3>Attack rate</h3>
+      <div class="val red" id="rate-pct">0%</div>
+      <div class="rate-bar">
+        <div class="rate-fill" id="rate-fill" style="width:0%"></div>
+      </div>
+      <div class="rate-label">of all traffic is malicious</div>
+    </div>
+  </div>
+</div>
+<script>
+const pie = new Chart(document.getElementById('pie'),{
+  type:'doughnut',
+  data:{
+    labels:['DoS','Probe','R2L','U2R'],
+    datasets:[{data:[0,0,0,0],
+      backgroundColor:['#f85149','#d29922','#a371f7','#58a6ff'],
+      borderWidth:0}]
+  },
+  options:{responsive:true,
+    plugins:{legend:{position:'bottom',
+      labels:{color:'#8b949e',font:{size:11},boxWidth:10}}}}
+});
+function update(){
+  fetch('/api/state').then(r=>r.json()).then(d=>{
+    document.getElementById('total').textContent  =d.total.toLocaleString();
+    document.getElementById('attacks').textContent=d.attacks.toLocaleString();
+    document.getElementById('normal').textContent =d.normal.toLocaleString();
+    document.getElementById('pps').textContent    =d.pps;
+    const rate=d.total>0?Math.round(d.attacks/d.total*100):0;
+    document.getElementById('rate-pct').textContent =rate+'%';
+    document.getElementById('rate-fill').style.width=rate+'%';
+    pie.data.datasets[0].data=[
+      d.attack_types.DoS,d.attack_types.Probe,
+      d.attack_types.R2L,d.attack_types.U2R];
+    pie.update('none');
+    document.getElementById('feed-body').innerHTML=
+      d.recent.map(r=>`
+        <div class="feed-row">
+          <span style="color:#8b949e">${r.id}</span>
+          <span><span class="badge ${r.label==='ATTACK'?'attack':'normal'}">${r.label}</span></span>
+          <span style="color:${r.label==='ATTACK'?'#f85149':'#3fb950'}">${r.type}</span>
+          <span style="color:#8b949e">${r.src}</span>
+          <span style="color:#8b949e">${r.dst}</span>
+          <span>${r.conf}%</span>
+        </div>`).join('');
+  });
+}
+setInterval(update,600);
+update();
+</script>
+</body>
+</html>"""
+
+@app.route('/')
+def index():
+    return render_template_string(HTML)
+
+@app.route('/api/state')
+def api_state():
+    return jsonify({
+        'total'        : state['total'],
+        'attacks'      : state['attacks'],
+        'normal'       : state['normal'],
+        'pps'          : state['pps'],
+        'attack_types' : state['attack_types'],
+        'recent'       : list(state['recent'])
+    })
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    print(f"Dashboard running at http://localhost:{port}")
+    app.run(host='0.0.0.0', port=port, debug=False)
