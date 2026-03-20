@@ -1,0 +1,12 @@
+{
+  "name": "IDS FINN",
+  "postStartCommand": "cd /workspaces/FINN_Networkintrusion && source env/bin/activate && python3 dashboard.py &",
+  "forwardPorts": [5000],
+  "portsAttributes": {
+    "5000": {
+      "label": "IDS Dashboard",
+      "onAutoForward": "openBrowserOnce",
+      "visibility": "public"
+    }
+  }
+}
