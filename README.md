@@ -9,3 +9,16 @@ python3 preprocess.py
 python3 train.py 
 python3 export_onnx.py 
 python3 finn_pipeline.py
+
+
+
+
+
+
+
+cd /workspaces/FINN_Networkintrusion
+python3 -m venv env
+source env/bin/activate
+pip install torch torchvision brevitas onnx onnxruntime scikit-learn pandas numpy matplotlib seaborn qonnx onnxscript setuptools==69.5.1
+python3 preprocess.py
+python3 train.py
