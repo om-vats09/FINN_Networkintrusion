@@ -1,0 +1,11 @@
+env/
+data/
+models/
+results/
+__pycache__/
+*.pyc
+*.pt
+*.onnx
+*.npy
+*.pkl
+*.png
