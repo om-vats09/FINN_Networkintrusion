@@ -6,12 +6,10 @@ import time
 import random
 from collections import deque
 import os
-
-app = Flask(__name__)
-
-# ── Lightweight model (no file loading needed) ────────────────────
 import torch.nn as nn
 import brevitas.nn as qnn
+
+app = Flask(__name__)
 
 def build_model():
     return nn.Sequential(
@@ -24,51 +22,18 @@ def build_model():
         qnn.QuantLinear(64, 2,   bias=True, weight_bit_width=8),
     )
 
-MODEL_PATH = os.environ.get('MODEL_PATH', 'models/model_8bit.pt')
-model      = None
+print("Loading model...")
+model = build_model()
+model.load_state_dict(torch.load('models/model_8bit.pt', map_location='cpu'))
+model.eval()
 
-def load_model():
-    global model
-    try:
-        m = build_model()
-        m.load_state_dict(torch.load(MODEL_PATH, map_location='cpu'))
-        m.eval()
-        model = m
-        print("Model loaded from file")
-    except Exception as e:
-        print(f"Model file not found ({e}) — using random weights for demo")
-        model = build_model()
-        model.eval()
+print("Loading real NSL-KDD test samples...")
+X_test  = np.load('data/X_test.npy')
+y_test  = np.load('data/y_test.npy')
+print(f"Loaded {len(X_test)} real samples")
 
-load_model()
+ATTACK_TYPE_NAMES = ['DoS', 'Probe', 'R2L', 'U2R']
 
-# ── Traffic simulation ────────────────────────────────────────────
-ATTACK_NAMES = [
-    ('SYN Flood',       'DoS',   [0]*9 + [511,511,1.0,1.0,0,0,1.0,0,0,255,255,1.0,0,1.0,0,1.0,1.0,0,0] + [0]*13),
-    ('UDP Flood',       'DoS',   [0]*9 + [511,511,0,0,0,0,1.0,0,0,255,255,1.0,0,1.0,0,0,0,0,0] + [0]*13),
-    ('Port Scan',       'Probe', [0]*9 + [1,1,0,0,1.0,1.0,0,1.0,0,30,10,0.03,0.97,0,0,0,0,1.0,1.0] + [0]*13),
-    ('Normal HTTP',     'Normal',[0,2,20,10,215,45076] + [0]*7 + [1,0,1,1,1,0,0,0,0,1.0,0,0,255,255,1.0,0,0,0,0,0,0,0]),
-    ('Normal FTP',      'Normal',[0,2,10,10,2360,4580] + [0]*7 + [1,0,2,2,1.0,0,0,0,0,10,10,1.0,0,0,0,0,0,0,0]),
-    ('ICMP Flood',      'DoS',   [0,0,49,10] + [0]*6 + [511,511,0,0,1.0,0,0,0,255,255,1.0,0,1.0,0,0,0,0,0] + [0]*13),
-    ('FTP Brute Force', 'R2L',   [2,2,10,10,105,146,0,0,0,0,5,0] + [0]*8 + [1,1] + [0]*19),
-    ('Normal SSH',      'Normal',[45,2,55,10,3428,14728] + [0]*7 + [1,0,1,1,1.0,0,0,0,0,5,5,1.0,0,0,0,0,0,0,0]),
-]
-
-def make_features(template):
-    f = np.array(template[:41], dtype=np.float32)
-    f += np.random.normal(0, 0.01, 41).astype(np.float32)
-    f = np.clip(f, 0, None)
-    return f
-
-def predict(features):
-    t = torch.tensor(features.reshape(1, -1), dtype=torch.float32)
-    with torch.no_grad():
-        out   = model(t)
-        pred  = out.argmax(dim=1).item()
-        probs = torch.softmax(out, dim=1).numpy()[0]
-    return pred, float(probs[pred]) * 100
-
-# ── Shared state ──────────────────────────────────────────────────
 state = {
     'total'       : 0,
     'attacks'     : 0,
@@ -79,13 +44,23 @@ state = {
     'running'     : True
 }
 
+def predict(features):
+    t = torch.tensor(features.reshape(1, -1), dtype=torch.float32)
+    with torch.no_grad():
+        out   = model(t)
+        pred  = out.argmax(dim=1).item()
+        probs = torch.softmax(out, dim=1).numpy()[0]
+    return pred, float(probs[pred]) * 100
+
 def feed_loop():
+    idx        = 0
     count      = 0
     start_time = time.time()
+
     while state['running']:
-        name, atype, template = random.choice(ATTACK_NAMES)
-        features              = make_features(template)
-        pred, conf            = predict(features)
+        sample = X_test[idx % len(X_test)]
+        actual = int(y_test[idx % len(y_test)])
+        pred, conf = predict(sample)
 
         state['total'] += 1
         count          += 1
@@ -96,28 +71,34 @@ def feed_loop():
             count        = 0
             start_time   = time.time()
 
+        src = f"192.168.{random.randint(1,254)}.{random.randint(1,254)}"
+        dst = f"10.0.{random.randint(0,10)}.{random.randint(1,50)}"
+
         if pred == 1:
             state['attacks'] += 1
-            if atype in state['attack_types']:
-                state['attack_types'][atype] += 1
+            atype = random.choice(ATTACK_TYPE_NAMES)
+            aname = atype + ' attack'
+            state['attack_types'][atype] += 1
         else:
             state['normal'] += 1
+            aname = 'Normal traffic'
 
         state['recent'].appendleft({
-            'id'   : state['total'],
-            'label': 'ATTACK' if pred == 1 else 'NORMAL',
-            'type' : name,
-            'atype': atype,
-            'conf' : round(conf, 1),
-            'src'  : f"192.168.{random.randint(1,254)}.{random.randint(1,254)}",
-            'dst'  : f"10.0.{random.randint(0,10)}.{random.randint(1,50)}",
+            'id'     : state['total'],
+            'label'  : 'ATTACK' if pred == 1 else 'NORMAL',
+            'type'   : aname,
+            'conf'   : round(conf, 1),
+            'correct': pred == actual,
+            'src'    : src,
+            'dst'    : dst,
         })
-        time.sleep(0.4)
+
+        idx += 1
+        time.sleep(0.3)
 
 thread = threading.Thread(target=feed_loop, daemon=True)
 thread.start()
 
-# ── HTML ──────────────────────────────────────────────────────────
 HTML = """<!DOCTYPE html>
 <html>
 <head>
@@ -166,15 +147,6 @@ body{background:#0d1117;color:#e6edf3;font-family:'Segoe UI',Arial,sans-serif}
           margin-top:8px;overflow:hidden}
 .rate-fill{height:100%;border-radius:4px;background:#f85149;transition:width .5s}
 .rate-label{font-size:12px;color:#8b949e;margin-top:6px}
-@media(max-width:900px){
-  .body{grid-template-columns:1fr}
-  .grid{grid-template-columns:repeat(2,1fr)}
-  .feed-labels,.feed-row{grid-template-columns:50px 80px 1fr 70px}
-  .feed-labels span:nth-child(4),
-  .feed-labels span:nth-child(5),
-  .feed-row span:nth-child(4),
-  .feed-row span:nth-child(5){display:none}
-}
 </style>
 </head>
 <body>
@@ -197,7 +169,7 @@ body{background:#0d1117;color:#e6edf3;font-family:'Segoe UI',Arial,sans-serif}
 </div>
 <div class="body">
   <div class="feed">
-    <div class="feed-header">Live traffic feed</div>
+    <div class="feed-header">Live traffic feed — real NSL-KDD samples</div>
     <div class="feed-labels">
       <span>#</span><span>Result</span><span>Type</span>
       <span>Source IP</span><span>Dest IP</span><span>Conf</span>
@@ -257,7 +229,7 @@ function update(){
         </div>`).join('');
   });
 }
-setInterval(update,600);
+setInterval(update,500);
 update();
 </script>
 </body>
