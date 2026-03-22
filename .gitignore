@@ -9,3 +9,6 @@ __pycache__/
 *.npy
 *.pkl
 *.png
+.DS_Store
+dashboard_error.log
+FINN_Networkintrusion
