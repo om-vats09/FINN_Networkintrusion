@@ -1,3 +1,15 @@
+Deployment flow for FPGA is documented in [`DEPLOYMENT_FLOW.md`](/Users/omvats/Desktop/FINN_Networkintrusion/DEPLOYMENT_FLOW.md).
+Use the 4-bit FINN deployment path:
+
+```bash
+python3 preprocess.py
+python3 train.py
+python3 finn_prepare_4bit_deploy.py
+python3 finn_build_accelerator.py --board zedboard
+```
+
+Note: the two `finn_*` scripts require a proper FINN environment. They will not run in a plain local venv unless FINN itself is set up.
+
 the link of the colab notebook is :https://colab.research.google.com/drive/14ASwORoM70xddq-ZnWJnG_iYuC234jVb?usp=sharing
 and the diffrent aspect I have explained in the part as followed into it 
 

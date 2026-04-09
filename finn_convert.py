@@ -1,4 +1,4 @@
-from qonnx.core.modelwrapper import ModelWrapper
+source bifrom qonnx.core.modelwrapper import ModelWrapper
 from qonnx.transformation.general import GiveUniqueNodeNames, GiveReadableTensorNames
 from qonnx.transformation.infer_shapes import InferShapes
 from qonnx.transformation.infer_datatypes import InferDataTypes

@@ -248,9 +248,10 @@ body {
 .stat.purple .stat-val { color: var(--purple); }
 .stat-sub { font-size: 10px; color: var(--muted); margin-top: 3px; font-family: var(--mono); }
 
-.main-row { display: grid; grid-template-columns: 1fr 360px; gap: 16px; }
+.main-row { display: grid; grid-template-columns: 1fr 360px; gap: 16px; align-items: stretch; }
 .left-col  { display: flex; flex-direction: column; gap: 16px; }
-.right-col { display: flex; flex-direction: column; gap: 16px; }
+.right-col { display: flex; flex-direction: column; gap: 16px; align-self: stretch; height: 100%; }
+.right-col > .panel:last-child { flex: 1; display: flex; flex-direction: column; }
 
 .panel {
   background: var(--surface);
@@ -346,6 +347,40 @@ body {
 }
 
 .chart-wrap { padding: 16px; }
+.chart-wrap.tight { padding: 12px 16px 10px; }
+.chart-wrap canvas { display: block; width: 100% !important; height: 100% !important; }
+.mini-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 16px;
+  flex: 1;
+  align-content: stretch;
+}
+.mini-card {
+  background: rgba(255,255,255,.03);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  min-height: 68px;
+  height: 100%;
+}
+.mini-k {
+  font-size: 9px;
+  font-family: var(--mono);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .7px;
+  margin-bottom: 8px;
+}
+.mini-v {
+  font-size: 14px;
+  font-family: var(--mono);
+  font-weight: 700;
+  color: #e6edf3;
+  line-height: 1.25;
+  word-break: break-word;
+}
 
 .rate-section { padding: 16px; }
 .rate-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
@@ -488,8 +523,20 @@ body {
         <div class="panel-hdr">
           <div class="panel-title"><span>◐</span> Protocol split</div>
         </div>
-        <div class="chart-wrap" style="height:140px;">
+        <div class="chart-wrap tight" style="height:104px;">
           <canvas id="proto-chart"></canvas>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-hdr">
+          <div class="panel-title"><span>◌</span> Quick snapshot</div>
+        </div>
+        <div class="mini-grid">
+          <div class="mini-card"><div class="mini-k">Bytes in</div><div class="mini-v" id="q-bytes">0B</div></div>
+          <div class="mini-card"><div class="mini-k">Alerts</div><div class="mini-v" id="q-alerts">0</div></div>
+          <div class="mini-card"><div class="mini-k">Top protocol</div><div class="mini-v" id="q-proto">—</div></div>
+          <div class="mini-card"><div class="mini-k">Top attack</div><div class="mini-v" id="q-attack">—</div></div>
         </div>
       </div>
 
@@ -518,6 +565,7 @@ body {
 
 <script>
 const $ = id => document.getElementById(id);
+const topKey = obj => Object.entries(obj).sort((a,b)=>b[1]-a[1])[0]?.[0] || '—';
 
 Chart.defaults.color = '#5c7a99';
 Chart.defaults.font.family = "'Space Mono', monospace";
@@ -678,6 +726,10 @@ function update() {
     $('feed-count').textContent = d.total.toLocaleString() + ' packets';
     $('rate-pct').textContent   = rate + '%';
     $('rate-fill').style.width  = Math.min(rate, 100) + '%';
+    $('q-bytes').textContent    = fmt(d.bytes_in);
+    $('q-alerts').textContent   = d.alerts.length;
+    $('q-proto').textContent    = topKey(d.protocols);
+    $('q-attack').textContent   = topKey(d.attack_types);
 
     pieChart.data.datasets[0].data = [d.attack_types.DoS, d.attack_types.Probe, d.attack_types.R2L, d.attack_types.U2R];
     pieChart.update('none');

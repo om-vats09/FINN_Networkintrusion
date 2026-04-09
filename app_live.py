@@ -367,9 +367,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13
 .stat.purple .stat-val{color:var(--purple)}.stat.teal .stat-val{color:#2dd4bf}
 .stat-sub{font-size:10px;color:var(--muted);margin-top:3px;font-family:var(--mono)}
 
-.main-row{display:grid;grid-template-columns:1fr 360px;gap:16px}
+.main-row{display:grid;grid-template-columns:1fr 360px;gap:16px;align-items:stretch}
 .left-col{display:flex;flex-direction:column;gap:16px}
-.right-col{display:flex;flex-direction:column;gap:16px}
+.right-col{display:flex;flex-direction:column;gap:16px;align-self:stretch;height:100%}
+.right-col>.panel:last-child{flex:1;display:flex;flex-direction:column}
 
 .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
 .panel-hdr{display:flex;align-items:center;justify-content:space-between;
@@ -426,6 +427,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13
            min-height:60px;display:flex;align-items:center;justify-content:center}
 
 .chart-wrap{padding:16px}
+.chart-wrap.tight{padding:12px 16px 10px}
+.chart-wrap canvas{display:block;width:100% !important;height:100% !important}
+.mini-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:16px;flex:1;align-content:stretch}
+.mini-card{background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:6px;padding:12px;min-height:68px;height:100%}
+.mini-k{font-size:9px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px}
+.mini-v{font-size:14px;font-family:var(--mono);font-weight:700;color:#e6edf3;line-height:1.25;word-break:break-word}
 .rate-section{padding:16px}
 .rate-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
 .rate-val{font-size:32px;font-family:var(--mono);font-weight:700;color:var(--red);letter-spacing:-2px}
@@ -539,7 +546,17 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13
 
       <div class="panel">
         <div class="panel-hdr"><div class="panel-title"><span>◐</span> Protocol split</div></div>
-        <div class="chart-wrap" style="height:140px"><canvas id="proto-chart"></canvas></div>
+        <div class="chart-wrap tight" style="height:104px"><canvas id="proto-chart"></canvas></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-hdr"><div class="panel-title"><span>◌</span> Quick snapshot</div></div>
+        <div class="mini-grid">
+          <div class="mini-card"><div class="mini-k">Bytes in</div><div class="mini-v" id="q-bytes">0B</div></div>
+          <div class="mini-card"><div class="mini-k">Retrains</div><div class="mini-v" id="q-retrains">0</div></div>
+          <div class="mini-card"><div class="mini-k">Top protocol</div><div class="mini-v" id="q-proto">—</div></div>
+          <div class="mini-card"><div class="mini-k">Top attack</div><div class="mini-v" id="q-attack">—</div></div>
+        </div>
       </div>
 
     </div>
@@ -567,6 +584,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13
 
 <script>
 const $ = id => document.getElementById(id);
+const topKey = obj => Object.entries(obj).sort((a,b)=>b[1]-a[1])[0]?.[0] || '—';
 Chart.defaults.color = '#5c7a99';
 Chart.defaults.font.family = "'Space Mono',monospace";
 Chart.defaults.font.size   = 10;
@@ -652,6 +670,10 @@ function update(){
     $('feed-count').textContent =d.total.toLocaleString()+' packets';
     $('rate-pct').textContent   =rate+'%';
     $('rate-fill').style.width  =Math.min(rate,100)+'%';
+    $('q-bytes').textContent    =fmt(d.bytes_in);
+    $('q-retrains').textContent =d.retrain_count;
+    $('q-proto').textContent    =topKey(d.protocols);
+    $('q-attack').textContent   =topKey(d.attack_types);
     $('buf-fill').style.width   =bufPct+'%';
     $('buf-count').textContent  =d.buffer_size;
     $('pl-normal').textContent  =d.pseudo_labels.normal;
