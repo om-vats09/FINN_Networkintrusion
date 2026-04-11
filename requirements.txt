@@ -3,4 +3,7 @@ torch
 brevitas
 numpy
 scikit-learn
+pandas
+matplotlib
+seaborn
 onnxruntime

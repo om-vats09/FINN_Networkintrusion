@@ -1,15 +1,31 @@
+# Environments
 env/
+.venv/
+.venv312/
+finn_env/
+
+# Data and models
 data/
 models/
 results/
-__pycache__/
-*.pyc
-*.pt
-*.onnx
 *.npy
 *.pkl
-*.png
+*.pt
+*.onnx
+*.bit
+*.hwh
+
+# Logs and cache
+*.log
+__pycache__/
 .DS_Store
-dashboard_error.log
-FINN_Networkintrusion
-dashboard_error.log
+Icon?
+
+# FINN build
+finn_repo/
+finn-base/
+build/
+
+# Images
+*.png
+*.jpg

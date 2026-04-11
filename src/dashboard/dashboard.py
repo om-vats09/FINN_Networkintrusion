@@ -5,6 +5,7 @@ import pickle
 import threading
 import time
 import random
+import sys
 from model import build_model
 from collections import deque
 
@@ -13,8 +14,8 @@ app = Flask(__name__)
 import os
 if not os.path.exists('models/model_8bit.pt'):
     print("Models not found — running setup...")
-    os.system('python3 preprocess.py')
-    os.system('python3 train.py')
+    os.system(f'{sys.executable} preprocess.py')
+    os.system(f'{sys.executable} train.py')
     print("Models ready.")
 
 def load_model():

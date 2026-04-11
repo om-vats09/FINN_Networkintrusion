@@ -2,7 +2,6 @@ from flask import Flask, jsonify, render_template_string
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import brevitas.nn as qnn
 import numpy as np
 import pickle
 import threading
@@ -10,6 +9,7 @@ import time
 import random
 import os
 from collections import deque
+from model import build_model
 
 try:
     from scapy.all import sniff, IP, TCP, UDP
@@ -19,19 +19,8 @@ except ImportError:
 
 app = Flask(__name__)
 
-def build_model():
-    return nn.Sequential(
-        qnn.QuantLinear(41, 64,  bias=True, weight_bit_width=8),
-        qnn.QuantReLU(bit_width=8),
-        qnn.QuantLinear(64, 128, bias=True, weight_bit_width=8),
-        qnn.QuantReLU(bit_width=8),
-        qnn.QuantLinear(128, 64, bias=True, weight_bit_width=8),
-        qnn.QuantReLU(bit_width=8),
-        qnn.QuantLinear(64, 2,   bias=True, weight_bit_width=8),
-    )
-
 print("Loading model...")
-model      = build_model()
+model      = build_model(8)
 model.load_state_dict(torch.load('models/model_8bit.pt', map_location='cpu'))
 model.eval()
 model_lock = threading.Lock()

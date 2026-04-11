@@ -42,7 +42,7 @@ y_test_t  = torch.tensor(y_test)
 print(f"\nBuilding {BITS}-bit quantized model...")
 model     = build_model(BITS).to(DEVICE)
 optimizer = torch.optim.Adam(model.parameters(), lr=LR)
-criterion = nn.CrossEntropyLoss()
+criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer, mode='max', factor=0.5, patience=5
 

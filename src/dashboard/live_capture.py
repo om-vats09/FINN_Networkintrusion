@@ -4,22 +4,10 @@ import torch
 import pickle
 import time
 from collections import defaultdict
-import torch.nn as nn
-import brevitas.nn as qnn
-
-def build_model():
-    return nn.Sequential(
-        qnn.QuantLinear(41, 64,  bias=True, weight_bit_width=8),
-        qnn.QuantReLU(bit_width=8),
-        qnn.QuantLinear(64, 128, bias=True, weight_bit_width=8),
-        qnn.QuantReLU(bit_width=8),
-        qnn.QuantLinear(128, 64, bias=True, weight_bit_width=8),
-        qnn.QuantReLU(bit_width=8),
-        qnn.QuantLinear(64, 2,   bias=True, weight_bit_width=8),
-    )
+from model import build_model
 
 print("Loading model and scaler...")
-model = build_model()
+model = build_model(8)
 model.load_state_dict(torch.load('models/model_8bit.pt', map_location='cpu'))
 model.eval()
 

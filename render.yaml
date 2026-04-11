@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: ids-finn-dashboard
-    runtime: python
-    buildCommand: pip install flask torch brevitas numpy onnxruntime
-    startCommand: python app.py
-    envVars:
-      - key: PORT
-        value: 5000
