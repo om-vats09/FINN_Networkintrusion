@@ -1,3 +1,5 @@
+import sys
+sys.path.insert(0, 'src/training')
 from flask import Flask, jsonify, render_template_string
 import torch
 import torch.nn as nn
